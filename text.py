@@ -1,10 +1,13 @@
 import time
 import logging
 import nltk
+nltk.download('punkt')
+nltk.download('punkt_tab')
 import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -22,17 +25,17 @@ import pandas as pd
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Setup Selenium
-chrome_driver_path = r"C:\\ChormeWebDriver\\chromedriver-win64\\chromedriver.exe"
 chrome_options = Options()
-chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-chrome_options.add_argument("--incognito")
+chrome_options.add_argument("--start-maximized")
 
-service = Service(chrome_driver_path)
+service = Service(ChromeDriverManager().install())
 driver = webdriver.Chrome(service=service, options=chrome_options)
 
+# Setup Selenium
+chrome_driver_path = r"C:\\ChormeWebDriver\\chromedriver-win64\\chromedriver.exe"
+
 # Mengakses halaman review
-original_url = "https://www.tokopedia.com/tokoexpert/asus-dual-rx-6600-8gb-gddr6"
+original_url = "https://www.tokopedia.com/liger-official-store/liger-handsfree-headset-earphone-l-10-metal-stereo-bass-biru-1731543200578176211?source=homepage.top_carousel.0.39123"
 parsed_url = urlparse(original_url)
 review_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path + "/review", "", "", ""))
 
@@ -72,6 +75,14 @@ driver.quit()
 
 # Preprocessing
 stemmer = StemmerFactory().create_stemmer()
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
 stop_words = set(stopwords.words('indonesian'))
 
 def preprocess_text(text):
