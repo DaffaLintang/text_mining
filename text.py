@@ -15,12 +15,10 @@ from urllib.parse import urlparse, urlunparse
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
 import pandas as pd
+import joblib
+from scipy.sparse import hstack, csr_matrix
+import numpy as np
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -34,10 +32,15 @@ driver = webdriver.Chrome(service=service, options=chrome_options)
 # Setup Selenium
 chrome_driver_path = r"C:\\ChormeWebDriver\\chromedriver-win64\\chromedriver.exe"
 
-# Mengakses halaman review
-original_url = "https://www.tokopedia.com/liger-official-store/liger-handsfree-headset-earphone-l-10-metal-stereo-bass-biru-1731543200578176211?source=homepage.top_carousel.0.39123"
+# Mengakses shortlink terlebih dahulu, ambil URL penuh, lalu buka halaman review
+shortlink = "https://tk.tokopedia.com/ZSUuKmyJY"
+driver.get(shortlink)
+WebDriverWait(driver, 20).until(lambda d: d.current_url != shortlink)
+time.sleep(2)
+original_url = driver.current_url
 parsed_url = urlparse(original_url)
-review_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path + "/review", "", "", ""))
+review_path = parsed_url.path.rstrip('/') + "/review"
+review_url = urlunparse((parsed_url.scheme, parsed_url.netloc, review_path, "", "", ""))
 
 driver.get(review_url)
 WebDriverWait(driver, 20).until(lambda d: d.title.strip() != "")
@@ -45,12 +48,27 @@ time.sleep(5)
 
 # Scraping review
 all_reviews = []
+category = ""
 while True:
     try:
         review_feed = driver.find_element(By.ID, "review-feed")
         reviews = review_feed.find_elements(By.XPATH, ".//span[@data-testid='lblItemUlasan']")
+        category = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, "//nav[@aria-label='Breadcrumb']//ol/li[2]//a"))).text.strip()
         
         for review in reviews:
+            try:
+                parent_container = review.find_element(By.XPATH, "./ancestor::*[self::div or self::li][1]")
+                more_button = parent_container.find_element(By.XPATH, ".//button[normalize-space()='Selengkapnya']")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", more_button)
+                driver.execute_script("arguments[0].click();", more_button)
+                try:
+                    WebDriverWait(driver, 5).until(EC.invisibility_of_element(more_button))
+                except Exception:
+                    time.sleep(0.5)
+            except Exception:
+                pass
+
             review_text = review.text.strip()
             if review_text and review_text not in all_reviews:
                 all_reviews.append(review_text)
@@ -73,6 +91,41 @@ while True:
 
 driver.quit()
 
+# Mapping kategori breadcrumb (ID) ke encoding yang Anda sediakan (EN)
+category_map = {
+    "Perawatan Hewan": 0,                 # Animal Care
+    "Otomotif": 1,                        # Automotive
+    "Kecantikan": 2,                      # Beauty
+    "Perawatan Tubuh": 3,                 # Body Care
+    "Buku": 4,                            # Books
+    "Audio, Kamera & Elektronik Lainnya": 5,  # Camera (atau gunakan 20 jika ingin 'Other Products')
+    "Pertukangan": 6,                     # Carpentry
+    "Komputer & Laptop": 7,               # Computers and Laptops
+    "Elektronik": 8,                      # Electronics
+    "Makanan & Minuman": 9,               # Food and Drink
+    "Gaming": 10,                         # Gaming
+    "Kesehatan": 11,                      # Health
+    "Rumah Tangga": 12,                   # Household
+    "Fashion Anak & Bayi": 13,            # Kids and Baby Fashion
+    "Dapur": 14,                          # Kitchen
+    "Fashion Pria": 15,                   # Men's Fashion
+    "Ibu & Bayi": 16,                     # Mother and Baby
+    "Film & Musik": 17,                   # Movies and Music
+    "Fashion Muslim": 18,                 # Muslim Fashion
+    "Office & Stationery": 19,            # Office & Stationery
+    "Lainnya": 20,                        # Other Products (fallback label jika ada)
+    "Perlengkapan Pesta": 21,             # Party Supplies and Craft
+    "Handphone & Tablet": 22,             # Phones and Tablets
+    "Logam Mulia": 23,                    # Precious Metal
+    "Properti": 24,                       # Property
+    "Olahraga": 25,                       # Sport
+    "Tiket, Travel, Voucher": 26,         # Tour and Travel
+    "Mainan & Hobi": 27,                  # Toys and Hobbies
+    "Fashion Wanita": 28,                 # Women's Fashion
+}
+
+encoded_category = category_map.get(category, 20)  # default ke Other Products bila tidak cocok
+
 # Preprocessing
 stemmer = StemmerFactory().create_stemmer()
 try:
@@ -92,36 +145,19 @@ def preprocess_text(text):
     words = [stemmer.stem(word) for word in words if word not in stop_words]
     return ' '.join(words)
 
-# Load Dataset untuk Training
-# Contoh dataset dummy (Bisa diganti dengan dataset nyata)
-dataset = {
-    "text": [
-        "produk ini sangat bagus, saya suka sekali!",
-        "barang jelek, tidak sesuai deskripsi!",
-        "pengiriman cepat, barang sesuai harapan",
-        "saya kecewa dengan kualitasnya",
-        "harga murah dan kualitas bagus",
-        "tidak direkomendasikan, sangat buruk"
-    ],
-    "label": ["Positif", "Negatif", "Positif", "Negatif", "Positif", "Negatif"]
-}
-
-df = pd.DataFrame(dataset)
-df['text'] = df['text'].apply(preprocess_text)
-
-# Splitting data untuk training dan testing
-X_train, X_test, y_train, y_test = train_test_split(df['text'], df['label'], test_size=0.2, random_state=42)
-
-# Membuat model Naïve Bayes dengan TF-IDF
-model = make_pipeline(TfidfVectorizer(), MultinomialNB())
-model.fit(X_train, y_train)
-
-y_pred = model.predict(X_test)
-logging.info(f"Akurasi Model: {accuracy_score(y_test, y_pred) * 100:.2f}%")
+# Load kembali model dan komponen praproses
+model = joblib.load('naive_bayes_model.pkl')
+vectorizer = joblib.load('tfidf_vectorizer.pkl')
 
 # Prediksi Sentimen Review yang di-Scrape
 logging.info("Hasil Sentimen Analysis (Naïve Bayes):")
-for i, review in enumerate(all_reviews, start=1):
-    preprocessed_review = preprocess_text(review)
-    sentiment = model.predict([preprocessed_review])[0]
-    print(f"{i}. Sentimen: {sentiment} | Review: {review}")
+texts_preprocessed = [preprocess_text(r) for r in all_reviews]
+if texts_preprocessed:
+    X_text = vectorizer.transform(texts_preprocessed)
+    # Gunakan encoding kategori numerik sesuai mapping yang diberikan
+    X_cat = csr_matrix(np.full((len(all_reviews), 1), encoded_category))
+    X_final = hstack([X_text, X_cat])
+    preds = model.predict(X_final)
+    for review, p in zip(all_reviews, preds):
+        label = "Positif" if p == 1 else ("Negatif" if p == 0 else str(p))
+        print(f"Sentimen: {label} | Review: {review}")
