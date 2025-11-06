@@ -61,8 +61,14 @@
       messageEl.textContent = msg || '';
     }
 
-    function appendLog(line) {
-      const ts = new Date().toLocaleTimeString();
+    function appendLog(line, tsStr) {
+      let ts
+      if (tsStr) {
+        // tsStr comes ISO-like from server, keep HH:MM:SS for compactness
+        try { ts = new Date(tsStr).toLocaleTimeString(); } catch (_) { ts = new Date().toLocaleTimeString(); }
+      } else {
+        ts = new Date().toLocaleTimeString();
+      }
       logEl.textContent += `[${ts}] ${line}\n`;
       logEl.scrollTop = logEl.scrollHeight;
     }
@@ -109,9 +115,9 @@
             // Final event may contain result for completed or failed
             if (data.status === 'failed') {
               setProgress(100, 'failed', data.message || 'Gagal');
-              appendLog('Gagal: ' + (data.result?.error || data.message || 'Unknown error'));
+              appendLog('Gagal: ' + (data.result?.error || data.message || 'Unknown error'), data.ts);
               if (data.result?.traceback) {
-                appendLog(data.result.traceback);
+                appendLog(data.result.traceback, data.ts);
               }
               es.close();
               startBtn.disabled = false;
@@ -119,14 +125,14 @@
             }
             if (data.result && data.status === 'completed') {
               setProgress(100, 'completed', 'Selesai');
-              appendLog('Selesai, menampilkan hasil');
+              appendLog('Selesai, menampilkan hasil', data.ts);
               renderResult(data.result);
               es.close();
               startBtn.disabled = false;
               return;
             }
             setProgress(data.percent, data.status, data.message);
-            appendLog(`${data.status || ''} ${data.percent||0}% • ${data.message || ''}`.trim());
+            appendLog(`${data.status || ''} ${data.percent||0}% • ${data.message || ''}`.trim(), data.ts);
           } catch (err) {
             appendLog('Error parsing stream: ' + err.message);
           }

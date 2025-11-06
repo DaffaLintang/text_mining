@@ -1,8 +1,6 @@
 import time
 import logging
 import nltk
-nltk.download('punkt')
-nltk.download('punkt_tab')
 import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -24,11 +22,12 @@ import uuid
 import threading
 import json
 import traceback
+from datetime import datetime
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-def get_reviews_and_category(shortlink: str):
+def get_reviews_and_category(shortlink: str, on_progress=None):
     chrome_options = Options()
     chrome_options.add_argument("--start-maximized")
     chrome_options.add_argument("--headless=new")
@@ -89,6 +88,11 @@ def get_reviews_and_category(shortlink: str):
                     review_text = review.text.strip()
                     if review_text and review_text not in all_reviews:
                         all_reviews.append(review_text)
+                        if on_progress:
+                            try:
+                                on_progress(len(all_reviews))
+                            except Exception:
+                                pass
 
                 try:
                     next_button = WebDriverWait(driver, 5).until(
@@ -165,7 +169,7 @@ vectorizer = joblib.load('tfidf_vectorizer.pkl')
 
 app = Flask(__name__)
 # Allow CORS for local file:// (Origin: null) and any origin during development
-CORS(app, resources={r"/analyze": {"origins": "*"}, r"/stream/*": {"origins": "*"}})
+CORS(app, resources={r"/analyze": {"origins": "*"}, r"/stream/*": {"origins": "*"}, r"/progress/*": {"origins": "*"}})
 
 # In-memory job progress store
 PROGRESS = {}
@@ -173,7 +177,7 @@ PROGRESS_LOCK = threading.Lock()
 
 def set_progress(job_id, status=None, percent=None, message=None, data=None):
     with PROGRESS_LOCK:
-        st = PROGRESS.get(job_id, {"status": "pending", "percent": 0, "message": "", "data": None})
+        st = PROGRESS.get(job_id, {"status": "pending", "percent": 0, "message": "", "data": None, "ts": None})
         if status is not None:
             st["status"] = status
         if percent is not None:
@@ -182,12 +186,15 @@ def set_progress(job_id, status=None, percent=None, message=None, data=None):
             st["message"] = message
         if data is not None:
             st["data"] = data
+        st["ts"] = datetime.now().isoformat(timespec='seconds')
         PROGRESS[job_id] = st
 
 def _run_analysis_job(job_id, shortlink):
     try:
         set_progress(job_id, status="running", percent=5, message="Resolving shortlink...")
-        reviews, category_name = get_reviews_and_category(shortlink)
+        def _scrape_progress(n):
+            set_progress(job_id, message=f"Sudah berhasil mengambil {n} data")
+        reviews, category_name = get_reviews_and_category(shortlink, on_progress=_scrape_progress)
         set_progress(job_id, percent=30, message=f"Scraped {len(reviews)} reviews; preprocessing...")
 
         texts_preprocessed = [preprocess_text(r) for r in reviews]
@@ -209,7 +216,7 @@ def _run_analysis_job(job_id, shortlink):
             label = "Positif" if p == 1 else ("Negatif" if p == 0 else str(p))
             items.append({"sentiment": label, "review": review})
             # Optional fine-grained progress
-            set_progress(job_id, percent=75 + int(20 * (i/len(reviews))), message=f"Aggregating results {i}/{len(reviews)}...")
+            set_progress(job_id, percent=75 + int(20 * (i/len(reviews))), message=f"Sudah berhasil mengambil {i} data")
 
         result = {
             "category": category_name,
@@ -233,7 +240,23 @@ def analyze():
     set_progress(job_id, status="queued", percent=0, message="Job queued")
     t = threading.Thread(target=_run_analysis_job, args=(job_id, shortlink), daemon=True)
     t.start()
-    return jsonify({"job_id": job_id}), 202
+    base = request.host_url.rstrip('/')
+    return jsonify({
+        "job_id": job_id,
+        "progress_url": f"{base}/progress/{job_id}",
+        "stream_url": f"{base}/stream/{job_id}"
+    }), 202
+
+@app.get('/progress/<job_id>')
+def progress(job_id):
+    with PROGRESS_LOCK:
+        st = PROGRESS.get(job_id)
+    if not st:
+        return jsonify({"error": "unknown job_id"}), 404
+    payload = {"status": st.get("status"), "percent": st.get("percent"), "message": st.get("message"), "ts": st.get("ts")}
+    if st.get("status") in ("completed", "failed") and st.get("data") is not None:
+        payload["result"] = st["data"]
+    return jsonify(payload)
 
 @app.get('/stream/<job_id>')
 def stream(job_id):
@@ -245,16 +268,16 @@ def stream(job_id):
             if not st:
                 yield f"data: {json.dumps({'error': 'unknown job_id'})}\n\n"
                 break
-            payload = {"status": st.get("status"), "percent": st.get("percent"), "message": st.get("message")}
+            payload = {"status": st.get("status"), "percent": st.get("percent"), "message": st.get("message"), "ts": st.get("ts")}
             if payload != last_payload:
                 yield f"data: {json.dumps(payload)}\n\n"
                 last_payload = payload
             if st.get("status") in ("completed", "failed"):
                 # send final data when completed
                 if st.get("data") is not None:
-                    yield f"data: {json.dumps({'status': st['status'], 'percent': st['percent'], 'message': st['message'], 'result': st['data']})}\n\n"
+                    yield f"data: {json.dumps({'status': st['status'], 'percent': st['percent'], 'message': st['message'], 'ts': st.get('ts'), 'result': st['data']})}\n\n"
                 break
-            time.sleep(1)
+            time.sleep(0.1)
     return Response(
         gen(),
         mimetype='text/event-stream',
