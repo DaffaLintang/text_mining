@@ -60,8 +60,8 @@ class ResultWidget extends StatelessWidget {
                                         ),
                                       ),
                                       Text(
-                                        sentimen[index],
-                                        style: TextStyle(fontSize: 20),
+                                        sentimen[index] ,
+                                        style: TextStyle(fontSize: 20, color: sentimen[index] == 'Positif' ? Colors.green : Colors.red),
                                       ),
                                     ],
                                   ),

@@ -22,7 +22,7 @@ class LandingPageView extends GetView<LandingPageController> {
               SizedBox(height: 10),
               LinkTextField(controller:   controller.linkController),
               const SizedBox(height: 20),  
-              SubmitButton(onPressed: () {}),
+              SubmitButton(onPressed: controller.createJob),
             ],
           ),
         ),

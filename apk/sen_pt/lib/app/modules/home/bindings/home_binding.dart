@@ -1,4 +1,5 @@
 import 'package:get/get.dart';
+import 'package:sen_pt/app/data/providers/analyzeProvider.dart';
 
 import '../controllers/home_controller.dart';
 import 'package:sen_pt/app/modules/landingPage/controllers/landing_page_controller.dart';
@@ -16,6 +17,10 @@ class HomeBinding extends Bindings {
     );
     Get.lazyPut<ResultPageController>(
       () => ResultPageController(),
+      fenix: true,
+    );
+    Get.lazyPut<AnalysisProvider>(
+      () => AnalysisProvider(),
       fenix: true,
     );
   }

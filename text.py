@@ -53,6 +53,13 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
         parsed_url = urlparse(original_url)
         review_path = parsed_url.path.rstrip('/') + "/review"
         review_url = urlunparse((parsed_url.scheme, parsed_url.netloc, review_path, "", "", ""))
+        # Capture product name on the product page (most reliable)
+        try:
+            product_name = WebDriverWait(driver, 10).until(
+                EC.visibility_of_element_located((By.XPATH, "//h1[@data-testid='lblPDPDetailProductName']"))
+            ).text.strip()
+        except Exception:
+            product_name = ""
 
         driver.get(review_url)
         if not WebDriverWait(driver, 40).until(lambda d: d.title.strip() != ""):
@@ -61,17 +68,55 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
 
         all_reviews = []
         category = ""
+        productName = product_name
         while True:
             try:
                 try:
                     review_feed = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "review-feed")))
                 except Exception:
                     raise RuntimeError("Elemen review-feed tidak ditemukan")
+                # Ensure the reviews container is in view so lazy content loads
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'start'});", review_feed)
+                    time.sleep(1)
+                except Exception:
+                    pass
+                # Wait for at least one review to appear with retries
                 reviews = review_feed.find_elements(By.XPATH, ".//span[@data-testid='lblItemUlasan']")
+                retries = 3
+                while not reviews and retries > 0:
+                    try:
+                        driver.execute_script("window.scrollBy(0, 600);")
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                    reviews = review_feed.find_elements(By.XPATH, ".//span[@data-testid='lblItemUlasan']")
+                    retries -= 1
                 category = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//nav[@aria-label='Breadcrumb']//ol/li[2]//a"))
-                ).text.strip()
-
+                ).text.strip()  
+                # productName already captured from product page; keep as-is
+                if not productName:
+                    # Fallbacks on review page
+                    try:
+                        pn = WebDriverWait(driver, 5).until(
+                            EC.visibility_of_element_located((By.XPATH, "//h1[@data-testid='lblPDPDetailProductName']"))
+                        ).text.strip()
+                        if pn:
+                            productName = pn
+                    except Exception:
+                        try:
+                            og = driver.find_element(By.XPATH, "//meta[@property='og:title']").get_attribute("content")
+                            if og:
+                                productName = og.strip()
+                        except Exception:
+                            try:
+                                # As a last resort, use last breadcrumb item text
+                                bc = driver.find_element(By.XPATH, "//nav[@aria-label='Breadcrumb']//ol/li[last()]//a").text
+                                if bc:
+                                    productName = bc.strip()
+                            except Exception:
+                                pass
                 for review in reviews:
                     try:
                         parent_container = review.find_element(By.XPATH, "./ancestor::*[self::div or self::li][1]")
@@ -109,7 +154,7 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
             except Exception as e:
                 logging.error(f"Error saat mengambil review: {type(e).__name__}: {e!r}")
                 break
-        return all_reviews, category
+        return all_reviews, category, productName
     finally:
         driver.quit()
 
@@ -194,12 +239,12 @@ def _run_analysis_job(job_id, shortlink):
         set_progress(job_id, status="running", percent=5, message="Resolving shortlink...")
         def _scrape_progress(n):
             set_progress(job_id, message=f"Sudah berhasil mengambil {n} data")
-        reviews, category_name = get_reviews_and_category(shortlink, on_progress=_scrape_progress)
+        reviews, category_name, product_name = get_reviews_and_category(shortlink, on_progress=_scrape_progress)
         set_progress(job_id, percent=30, message=f"Scraped {len(reviews)} reviews; preprocessing...")
 
         texts_preprocessed = [preprocess_text(r) for r in reviews]
         if not texts_preprocessed:
-            set_progress(job_id, status="completed", percent=100, message="No reviews found", data={"category": category_name, "items": []})
+            set_progress(job_id, status="completed", percent=100, message="No reviews found", data={"category": category_name, "product_name": product_name, "items": []})
             return
 
         set_progress(job_id, percent=55, message="Vectorizing...")
@@ -221,6 +266,7 @@ def _run_analysis_job(job_id, shortlink):
         result = {
             "category": category_name,
             "category_encoded": encoded_category,
+            "product_name": product_name,
             "count": len(items),
             "items": items
         }

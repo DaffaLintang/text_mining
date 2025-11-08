@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'package:get/get.dart';
+import 'package:sen_pt/app/widgets/pieChart.dart';
+import 'package:sen_pt/app/widgets/result.dart';
 
-import '../controllers/result_page_controller.dart';
+import '../controllers/result_page_controller.dart';    
 
 class ResultPageView extends GetView<ResultPageController> {
   const ResultPageView({super.key});
@@ -14,8 +16,17 @@ class ResultPageView extends GetView<ResultPageController> {
           padding: const EdgeInsets.all(24),
           child: Column(
             children: [
-              // ResultWidget(itemCount: controller.itemCount, productName: controller.productName, comments: controller.comments, sentimen: controller.sentimen),
-              // PieChartWidget(positifCount: controller.positifCount, negatifCount: controller.negatifCount),
+              Obx(() => ResultWidget(
+                    itemCount: controller.itemCount.value,
+                    productName: controller.productName.value,
+                    comments: controller.comments,
+                    sentimen: controller.sentimen,
+                  )),
+              SizedBox(height: 20),
+              Obx(() => PieChartWidget(
+                    positifCount: controller.positifCount.value,
+                    negatifCount: controller.negatifCount.value,
+                  )),
             ],
           ),
         ),
