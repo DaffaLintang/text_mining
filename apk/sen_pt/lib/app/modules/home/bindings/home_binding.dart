@@ -15,10 +15,8 @@ class HomeBinding extends Bindings {
       () => LandingPageController(),
       fenix: true,
     );
-    Get.lazyPut<ResultPageController>(
-      () => ResultPageController(),
-      fenix: true,
-    );
+    // Use a single permanent instance so it won't be disposed/recreated
+    Get.put<ResultPageController>(ResultPageController(), permanent: true);
     Get.lazyPut<AnalysisProvider>(
       () => AnalysisProvider(),
       fenix: true,

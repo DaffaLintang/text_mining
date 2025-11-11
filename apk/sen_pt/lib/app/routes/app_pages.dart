@@ -4,7 +4,6 @@ import '../modules/home/bindings/home_binding.dart';
 import '../modules/home/views/home_view.dart';
 import '../modules/landingPage/bindings/landing_page_binding.dart';
 import '../modules/landingPage/views/landing_page_view.dart';
-import '../modules/resultPage/bindings/result_page_binding.dart';
 import '../modules/resultPage/views/result_page_view.dart';
 
 part 'app_routes.dart';
@@ -28,7 +27,6 @@ class AppPages {
     GetPage(
       name: _Paths.RESULT_PAGE,
       page: () => const ResultPageView(),
-      binding: ResultPageBinding(),
     ),
   ];
 }

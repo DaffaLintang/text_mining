@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:sen_pt/app/modules/resultPage/controllers/result_page_controller.dart';
 
 class ResultWidget extends StatelessWidget {
-  const ResultWidget({super.key, required this.itemCount, required this.productName, required this.comments, required this.sentimen});
+  const ResultWidget({super.key, required this.itemCount, required this.productName, required this.comments, required this.sentimen, required this.jobId, required this.filename, required this.resultPageController});
 
   final int itemCount;
   final String productName;
   final List<String> comments;
   final List<String> sentimen;
+  final ResultPageController resultPageController;
+  final String jobId;
+  final String filename;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +28,12 @@ class ResultWidget extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text('Hasil Analisis', style: TextStyle(fontSize: 20)),
-                          Icon(Icons.article_outlined, size: 30),
+                          GestureDetector(
+                            onTap: () {
+                              resultPageController.downloadPdf('$jobId', '$filename');
+                            },
+                            child: Icon(Icons.article_outlined, size: 30),
+                          ),
                         ],
                       ),
                       SizedBox(height: 10),

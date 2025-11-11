@@ -64,6 +64,9 @@ class LandingPageController extends GetxController {
         });
 
         if (job != null) {
+          // Simpan jobId (dan filename default) ke ResultPageController
+          final rc = Get.find<ResultPageController>();
+          rc.jobId.value = job.jobId;
           // Cancel previous subscription if any to avoid multiple listeners
           await _progressSub?.cancel();
           final stream = Get.find<AnalysisProvider>()

@@ -21,6 +21,9 @@ class ResultPageView extends GetView<ResultPageController> {
                     productName: controller.productName.value,
                     comments: controller.comments,
                     sentimen: controller.sentimen,
+                    jobId: controller.jobId.value,
+                    filename: controller.filename.value,
+                    resultPageController: controller,
                   )),
               SizedBox(height: 20),
               Obx(() => PieChartWidget(
