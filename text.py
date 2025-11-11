@@ -16,13 +16,24 @@ from nltk.corpus import stopwords
 import joblib
 from scipy.sparse import hstack, csr_matrix
 import numpy as np
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 import uuid
 import threading
 import json
 import traceback
 from datetime import datetime
+import io
+import csv
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+
+# Use non-interactive backend for headless environments
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -213,8 +224,7 @@ model = joblib.load('naive_bayes_model.pkl')
 vectorizer = joblib.load('tfidf_vectorizer.pkl')
 
 app = Flask(__name__)
-# Allow CORS for local file:// (Origin: null) and any origin during development
-CORS(app, resources={r"/analyze": {"origins": "*"}, r"/stream/*": {"origins": "*"}, r"/progress/*": {"origins": "*"}})
+CORS(app, resources={r"/analyze": {"origins": "*"}, r"/stream/*": {"origins": "*"}, r"/progress/*": {"origins": "*"}, r"/download/*": {"origins": "*"}})
 
 # In-memory job progress store
 PROGRESS = {}
@@ -333,6 +343,82 @@ def stream(job_id):
             'Access-Control-Allow-Origin': '*'
         }
     )
+
+@app.get('/download/<job_id>/pdf')
+def download_pdf(job_id):
+    with PROGRESS_LOCK:
+        st = PROGRESS.get(job_id)
+    if not st:
+        return jsonify({"error": "unknown job_id"}), 404
+    if st.get("status") != "completed" or not st.get("data"):
+        return jsonify({"error": "job not completed"}), 400
+
+    data = st["data"]
+    items = data.get("items", [])
+    pos = sum(1 for it in items if it.get("sentiment") == "Positif")
+    neg = sum(1 for it in items if it.get("sentiment") == "Negatif")
+
+    chart_bytes = io.BytesIO()
+    labels = ["Positif", "Negatif"]
+    sizes = [pos, neg]
+    chart_colors = ['#34D399', '#F87171']
+    explode = (0.04, 0.04) if pos and neg else (0, 0)
+    fig, ax = plt.subplots(figsize=(4.5, 4.5))
+    ax.pie(sizes, explode=explode, labels=labels, colors=chart_colors, autopct='%1.1f%%', startangle=140)
+    ax.axis('equal')
+    plt.tight_layout()
+    fig.savefig(chart_bytes, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    chart_bytes.seek(0)
+
+    pdf_buf = io.BytesIO()
+    doc = SimpleDocTemplate(pdf_buf, pagesize=A4)
+    styles = getSampleStyleSheet()
+    elements = []
+    title = f"Hasil Analisis Sentimen"
+    elements.append(Paragraph(title, styles['Title']))
+    elements.append(Spacer(1, 12))
+    meta_data = [
+        ["Category", data.get("category", "")],
+        ["Product Name", data.get("product_name", "")],
+        ["Total Reviews", str(data.get("count", 0))],
+        ["Generated At", st.get("ts", "")],
+        ["Positif", str(pos)],
+        ["Negatif", str(neg)],
+    ]
+    meta_table = Table(meta_data, hAlign='LEFT')
+    meta_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,-1), colors.whitesmoke),
+        ('TEXTCOLOR', (0,0), (0,-1), colors.black),
+        ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+        ('FONTSIZE', (0,0), (-1,-1), 9),
+        ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
+    ]))
+    elements.append(meta_table)
+    elements.append(Spacer(1, 12))
+    rl_img = RLImage(chart_bytes, width=250, height=250)
+    elements.append(rl_img)
+    elements.append(Spacer(1, 12))
+    data_rows = [[Paragraph("sentiment", styles['BodyText']), Paragraph("review", styles['BodyText'])]]
+    for it in items:
+        s = it.get("sentiment", "")
+        r = it.get("review", "")
+        data_rows.append([Paragraph(s, styles['BodyText']), Paragraph(r, styles['BodyText'])])
+    table = Table(data_rows, repeatRows=1, hAlign='LEFT', colWidths=[80, 400])
+    table.setStyle(TableStyle([
+        ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+        ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+        ('FONTSIZE', (0,0), (-1,-1), 9),
+    ]))
+    elements.append(table)
+    doc.build(elements)
+    pdf_buf.seek(0)
+    filename = f"sentiment_{job_id}.pdf"
+    return send_file(pdf_buf, as_attachment=True, download_name=filename, mimetype='application/pdf')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
