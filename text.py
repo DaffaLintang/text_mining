@@ -1,39 +1,45 @@
-import time
-import logging
-import nltk
-import re
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from urllib.parse import urlparse, urlunparse
-from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-import joblib
-from scipy.sparse import hstack, csr_matrix
-import numpy as np
-from flask import Flask, request, jsonify, Response, send_file
-from flask_cors import CORS
-import uuid
-import threading
-import json
-import traceback
 from datetime import datetime
+from collections import Counter
 import io
-import csv
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib import colors
+import json
+import logging
+import re
+import threading
+import time
+import traceback
+from urllib.parse import urlparse, urlunparse
+import uuid
 
-# Use non-interactive backend for headless environments
+from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
+from flask import Flask, Response, jsonify, request, send_file
+from flask_cors import CORS
+import joblib
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import numpy as np
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import (
+    Image as RLImage,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
+from scipy.sparse import csr_matrix, hstack
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
+matplotlib.use('Agg')
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -220,6 +226,172 @@ def preprocess_text(text):
     words = [stemmer.stem(word) for word in words if word not in stop_words]
     return ' '.join(words)
 
+def _preprocess_for_bigrams(text):
+    text = str(text or "").lower()
+    text = re.sub(r'[^a-zA-Z\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    if not text:
+        return []
+    toks = [t for t in text.split(' ') if t]
+    # Keep common negations even if they exist in stopwords; they are important for bigram meaning.
+    keep = {"tidak", "tak", "bukan", "belum", "jangan", "ga", "gak", "nggak", "tdk"}
+    filler = {
+        "yg", "yang", "nya", "nih", "sih", "aja", "deh", "dong", "kok", "lah", "kak",
+        "min", "gan", "temen", "teman", "rumah", "varian", "dominan",
+    }
+    cleaned = []
+    for t in toks:
+        if t in filler:
+            continue
+        if (t not in keep) and (t in stop_words):
+            continue
+        if len(t) <= 2 and t not in keep:
+            continue
+        cleaned.append(stemmer.stem(t))
+    toks = cleaned
+    return toks
+
+def summarize_top_terms_by_sentiment(
+    X_text,
+    preds,
+    vectorizer,
+    texts_preprocessed=None,
+    reviews=None,
+    top_n=15,
+):
+
+    import numpy as np
+    from collections import Counter
+
+    preds_arr = np.asarray(preds)
+
+    pos_idx = np.where(preds_arr == 1)[0]
+    neg_idx = np.where(preds_arr == 0)[0]
+
+    pos_count = len(pos_idx)
+    neg_count = len(neg_idx)
+
+    dominant = "Positif" if pos_count >= neg_count else "Negatif"
+
+
+    # ==========================
+    # PREPROCESS BIGRAM TOKENS
+    # ==========================
+
+    def get_tokens(i):
+
+        if reviews is not None and i < len(reviews):
+
+            toks = _preprocess_for_bigrams(reviews[i])
+
+        elif texts_preprocessed is not None:
+
+            toks = texts_preprocessed[i].split()
+
+        else:
+
+            toks = []
+
+        return toks
+
+
+    # ==========================
+    # COUNT BIGRAMS
+    # ==========================
+
+    pos_counter = Counter()
+    neg_counter = Counter()
+
+    for i in pos_idx:
+
+        toks = get_tokens(i)
+
+        for a, b in zip(toks, toks[1:]):
+
+            pos_counter[f"{a} {b}"] += 1
+
+
+    for i in neg_idx:
+
+        toks = get_tokens(i)
+
+        for a, b in zip(toks, toks[1:]):
+
+            neg_counter[f"{a} {b}"] += 1
+
+
+
+    # ==========================
+    # DISTINCTIVENESS FUNCTION
+    # ==========================
+
+    def distinctive(counter_main, counter_other, total_main):
+
+        results = []
+
+        for phrase, freq_main in counter_main.items():
+
+            if freq_main < 3:
+                continue
+
+
+            freq_other = counter_other.get(phrase, 0)
+
+
+            # DISTINCTIVENESS SCORE
+            score = (freq_main + 1) / (freq_other + 1)
+
+
+            # FILTER GENERIC PHRASES
+            relative_freq = freq_main / total_main
+
+            if relative_freq < 0.01:
+                continue
+
+
+            if score < 2:
+                continue
+
+
+            results.append((score, freq_main, phrase))
+
+
+
+        results.sort(reverse=True)
+
+
+        return [phrase for score, freq, phrase in results[:top_n]]
+
+
+
+    top_pos = distinctive(pos_counter, neg_counter, pos_count)
+
+    top_neg = distinctive(neg_counter, pos_counter, neg_count)
+
+
+
+    return {
+
+        "dominant_sentiment": dominant,
+
+        "counts": {
+
+            "Positif": pos_count,
+
+            "Negatif": neg_count,
+
+        },
+
+        "top_bigrams": {
+
+            "Positif": top_pos,
+
+            "Negatif": top_neg,
+
+        },
+
+    }
+
 model = joblib.load('naive_bayes_model.pkl')
 vectorizer = joblib.load('tfidf_vectorizer.pkl')
 
@@ -266,6 +438,16 @@ def _run_analysis_job(job_id, shortlink):
         X_final = hstack([X_text, X_cat])
         preds = model.predict(X_final)
 
+        set_progress(job_id, percent=85, message="Meringkas kata dominan per sentimen...")
+        summary = summarize_top_terms_by_sentiment(
+            X_text,
+            preds,
+            vectorizer,
+            texts_preprocessed=texts_preprocessed,
+            reviews=reviews,
+            top_n=15,
+        )
+
         items = []
         for i, (review, p) in enumerate(zip(reviews, preds), start=1):
             label = "Positif" if p == 1 else ("Negatif" if p == 0 else str(p))
@@ -278,7 +460,8 @@ def _run_analysis_job(job_id, shortlink):
             "category_encoded": encoded_category,
             "product_name": product_name,
             "count": len(items),
-            "items": items
+            "items": items,
+            "summary": summary,
         }
         set_progress(job_id, status="completed", percent=100, message="Done", data=result)
     except Exception as e:
@@ -355,6 +538,7 @@ def download_pdf(job_id):
 
     data = st["data"]
     items = data.get("items", [])
+    summary = data.get("summary") or {}
     pos = sum(1 for it in items if it.get("sentiment") == "Positif")
     neg = sum(1 for it in items if it.get("sentiment") == "Negatif")
 
@@ -398,6 +582,29 @@ def download_pdf(job_id):
     ]))
     elements.append(meta_table)
     elements.append(Spacer(1, 12))
+
+    top_bi = summary.get("top_bigrams") or {}
+    pos_bi = top_bi.get("Positif") or []
+    neg_bi = top_bi.get("Negatif") or []
+    if pos_bi or neg_bi:
+        elements.append(Paragraph("Ringkasan frasa dominan (bigram, frekuensi)", styles['Heading3']))
+        bi_rows = [[Paragraph("Positif (top)", styles['BodyText']), Paragraph("Negatif (top)", styles['BodyText'])]]
+        max_rows = max(len(pos_bi), len(neg_bi), 1)
+        for i in range(max_rows):
+            p = pos_bi[i] if i < len(pos_bi) else ""
+            n = neg_bi[i] if i < len(neg_bi) else ""
+            bi_rows.append([Paragraph(p, styles['BodyText']), Paragraph(n, styles['BodyText'])])
+        bi_table = Table(bi_rows, repeatRows=1, hAlign='LEFT', colWidths=[240, 240])
+        bi_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+        ]))
+        elements.append(bi_table)
+        elements.append(Spacer(1, 12))
+
     rl_img = RLImage(chart_bytes, width=250, height=250)
     elements.append(rl_img)
     elements.append(Spacer(1, 12))

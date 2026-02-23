@@ -47,15 +47,15 @@ class PieChartWidget extends StatelessWidget {
                           PieChartData(
                             sections: [
                               PieChartSectionData(
-                                value: positifCount.toDouble(),
+                                value: negatifCount.toDouble(),
                                 color: Colors.red,
-                                title: '75%',
+                                title: (negatifCount/(positifCount+negatifCount)*100).toStringAsFixed(2)+"%",
                                 radius: 60,
                               ),
                               PieChartSectionData(
-                                value: negatifCount.toDouble(),
+                                value: positifCount.toDouble(),
                                 color: Colors.green,
-                                title: '75%',
+                                title: (positifCount/(positifCount+negatifCount)*100).toStringAsFixed(2)+"%",
                                 radius: 60,
                               ),
                             ],
