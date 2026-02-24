@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:get/get.dart';
 import 'package:sen_pt/app/widgets/pieChart.dart';
+import 'package:sen_pt/app/widgets/resume.dart';
 import 'package:sen_pt/app/widgets/result.dart';
 
 import '../controllers/result_page_controller.dart';    
@@ -30,6 +31,15 @@ class ResultPageView extends GetView<ResultPageController> {
                     positifCount: controller.positifCount.value,
                     negatifCount: controller.negatifCount.value,
                   )),
+              SizedBox(height: 20),
+              Obx(() {
+                final pos = controller.topPhrasesPositif.toList();
+                final neg = controller.topPhrasesNegatif.toList();
+                return ResumeWidget(
+                  topPhrasesPositif: pos,
+                  topPhrasesNegatif: neg,
+                );
+              }),
             ],
           ),
         ),

@@ -12,6 +12,8 @@ class ResultPageController extends GetxController {
   final sentimen = <String>[].obs;
   final positifCount = 0.obs;
   final negatifCount = 0.obs;
+  final topPhrasesPositif = <String>[].obs;
+  final topPhrasesNegatif = <String>[].obs;
   final jobId = ''.obs;
   final filename = ''.obs;
 
@@ -39,6 +41,16 @@ class ResultPageController extends GetxController {
     }
     positifCount.value = pos;
     negatifCount.value = neg;
+  }
+
+  void updateFromResume(Resume resume) {
+    // counts from summary (more authoritative than recalculating from items)
+    if (resume.positif > 0 || resume.negatif > 0) {
+      positifCount.value = resume.positif;
+      negatifCount.value = resume.negatif;
+    }
+    topPhrasesPositif.assignAll(resume.topPhrasesPositif);
+    topPhrasesNegatif.assignAll(resume.topPhrasesNegatif);
   }
 
   void downloadPdf([String? inJobId, String? inFilename]) async {

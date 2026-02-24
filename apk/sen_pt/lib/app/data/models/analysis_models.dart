@@ -4,6 +4,7 @@ class AnalysisProgress {
   final String message;
   final DateTime ts;
   final AnalysisResult? result;
+  final Resume resume;
 
   AnalysisProgress({
     required this.status,
@@ -11,6 +12,7 @@ class AnalysisProgress {
     required this.message,
     required this.ts,
     this.result,
+    required this.resume,
   });
 
   factory AnalysisProgress.fromJson(Map<String, dynamic> json) {
@@ -57,12 +59,84 @@ class AnalysisProgress {
       return null;
     }
 
+    Resume parseResume(Map<String, dynamic> jsonRoot) {
+      // Prefer result.summary (current backend), fallback to resume (older/alternate clients)
+      final dynamic resultObj = jsonRoot['result'];
+      if (resultObj is Map<String, dynamic>) {
+        final dynamic summaryObj = resultObj['summary'];
+        if (summaryObj is Map<String, dynamic>) {
+          try { return Resume.fromJson(summaryObj); } catch (_) {}
+        }
+      }
+      final dynamic resumeObj = jsonRoot['resume'];
+      if (resumeObj is Map<String, dynamic>) {
+        try { return Resume.fromJson(resumeObj); } catch (_) {}
+      }
+      return const Resume.empty();
+    }
+
     return AnalysisProgress(
       status: (json['status'] ?? '').toString(),
       percent: parsePercent(json['percent']),
       message: (json['message'] ?? '').toString(),
       ts: parseTs(json['ts']),
       result: parseResult(json['result']),
+      resume: parseResume(json),
+    );
+  }
+}
+
+class Resume {
+  final String dominantSentiment;
+  final int positif;
+  final int negatif;
+  final List<String> topPhrasesPositif;
+  final List<String> topPhrasesNegatif;
+
+  int get total => positif + negatif;
+
+  const Resume({
+    required this.dominantSentiment,
+    required this.positif,
+    required this.negatif,
+    required this.topPhrasesPositif,
+    required this.topPhrasesNegatif,
+  });
+
+  const Resume.empty()
+      : dominantSentiment = '',
+        positif = 0,
+        negatif = 0,
+        topPhrasesPositif = const [],
+        topPhrasesNegatif = const [];
+
+  factory Resume.fromJson(Map<String, dynamic> json) {
+    final counts = (json['counts'] is Map) ? (json['counts'] as Map) : const {};
+    final topPhrases = (json['top_phrases'] is Map) ? (json['top_phrases'] as Map) : const {};
+
+    int _asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is double) return v.round();
+      if (v is String) {
+        final n = int.tryParse(v);
+        return n ?? 0;
+      }
+      return 0;
+    }
+
+    List<String> _asStringList(dynamic v) {
+      if (v is List) {
+        return v.map((e) => e.toString()).toList();
+      }
+      return const [];
+    }
+
+    return Resume(
+      dominantSentiment: (json['dominant_sentiment'] ?? '').toString(),
+      positif: _asInt(counts['Positif']),
+      negatif: _asInt(counts['Negatif']),
+      topPhrasesPositif: _asStringList(topPhrases['Positif']),
+      topPhrasesNegatif: _asStringList(topPhrases['Negatif']),
     );
   }
 }

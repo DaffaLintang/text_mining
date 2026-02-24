@@ -75,6 +75,9 @@ class LandingPageController extends GetxController {
           _progressSub = stream.listen((AnalysisProgress data) {
             percent.value = data.percent;
             message.value = data.message;
+            try {
+              Get.find<ResultPageController>().updateFromResume(data.resume);
+            } catch (_) {}
             // Push incremental result if present
             if (data.result != null) {
               try {

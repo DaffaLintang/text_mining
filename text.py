@@ -1,5 +1,4 @@
 from datetime import datetime
-from collections import Counter
 import io
 import json
 import logging
@@ -31,6 +30,11 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+from keybert import KeyBERT
+from sentence_transformers import SentenceTransformer
+from collections import Counter
+
 from scipy.sparse import csr_matrix, hstack
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -40,6 +44,25 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 matplotlib.use('Agg')
+
+def _to_builtin(obj):
+    try:
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, (np.ndarray,)):
+            return obj.tolist()
+    except Exception:
+        pass
+    if isinstance(obj, dict):
+        return {str(k): _to_builtin(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_builtin(v) for v in obj]
+    return obj
+
+def _json_dumps(obj):
+    return json.dumps(_to_builtin(obj), ensure_ascii=False)
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -226,174 +249,96 @@ def preprocess_text(text):
     words = [stemmer.stem(word) for word in words if word not in stop_words]
     return ' '.join(words)
 
-def _preprocess_for_bigrams(text):
-    text = str(text or "").lower()
-    text = re.sub(r'[^a-zA-Z\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    if not text:
-        return []
-    toks = [t for t in text.split(' ') if t]
-    # Keep common negations even if they exist in stopwords; they are important for bigram meaning.
-    keep = {"tidak", "tak", "bukan", "belum", "jangan", "ga", "gak", "nggak", "tdk"}
-    filler = {
-        "yg", "yang", "nya", "nih", "sih", "aja", "deh", "dong", "kok", "lah", "kak",
-        "min", "gan", "temen", "teman", "rumah", "varian", "dominan",
-    }
-    cleaned = []
-    for t in toks:
-        if t in filler:
-            continue
-        if (t not in keep) and (t in stop_words):
-            continue
-        if len(t) <= 2 and t not in keep:
-            continue
-        cleaned.append(stemmer.stem(t))
-    toks = cleaned
-    return toks
+def summarize_with_keybert(reviews, preds, top_n=10):
 
-def summarize_top_terms_by_sentiment(
-    X_text,
-    preds,
-    vectorizer,
-    texts_preprocessed=None,
-    reviews=None,
-    top_n=15,
-):
-
-    import numpy as np
     from collections import Counter
 
-    preds_arr = np.asarray(preds)
-
-    pos_idx = np.where(preds_arr == 1)[0]
-    neg_idx = np.where(preds_arr == 0)[0]
-
-    pos_count = len(pos_idx)
-    neg_count = len(neg_idx)
-
-    dominant = "Positif" if pos_count >= neg_count else "Negatif"
+    pos_phrases_all = []
+    neg_phrases_all = []
 
 
-    # ==========================
-    # PREPROCESS BIGRAM TOKENS
-    # ==========================
+    # Extract keyword PER REVIEW
+    for review, pred in zip(reviews, preds):
 
-    def get_tokens(i):
+        keywords = kw_model.extract_keywords(
 
-        if reviews is not None and i < len(reviews):
+            review,
 
-            toks = _preprocess_for_bigrams(reviews[i])
+            keyphrase_ngram_range=(2,3),
 
-        elif texts_preprocessed is not None:
+            stop_words=None,
 
-            toks = texts_preprocessed[i].split()
+            top_n=3   # batasi per review
+
+        )
+
+
+        phrases = [kw for kw, score in keywords]
+
+
+        if pred == 1:
+
+            pos_phrases_all.extend(phrases)
 
         else:
 
-            toks = []
-
-        return toks
-
-
-    # ==========================
-    # COUNT BIGRAMS
-    # ==========================
-
-    pos_counter = Counter()
-    neg_counter = Counter()
-
-    for i in pos_idx:
-
-        toks = get_tokens(i)
-
-        for a, b in zip(toks, toks[1:]):
-
-            pos_counter[f"{a} {b}"] += 1
-
-
-    for i in neg_idx:
-
-        toks = get_tokens(i)
-
-        for a, b in zip(toks, toks[1:]):
-
-            neg_counter[f"{a} {b}"] += 1
+            neg_phrases_all.extend(phrases)
 
 
 
-    # ==========================
-    # DISTINCTIVENESS FUNCTION
-    # ==========================
-
-    def distinctive(counter_main, counter_other, total_main):
-
-        results = []
-
-        for phrase, freq_main in counter_main.items():
-
-            if freq_main < 3:
-                continue
+    # Hitung frekuensi
+    pos_counter = Counter(pos_phrases_all)
+    neg_counter = Counter(neg_phrases_all)
 
 
-            freq_other = counter_other.get(phrase, 0)
+    # Filter minimal muncul 2x agar spam hilang
+    pos_common = [
+
+        phrase for phrase, count in pos_counter.items()
+
+        if count >= 2
+
+    ]
+
+    neg_common = [
+
+        phrase for phrase, count in neg_counter.items()
+
+        if count >= 2
+
+    ]
 
 
-            # DISTINCTIVENESS SCORE
-            score = (freq_main + 1) / (freq_other + 1)
+    # Sort berdasarkan frekuensi
+    pos_common = sorted(pos_common, key=lambda x: pos_counter[x], reverse=True)[:top_n]
+
+    neg_common = sorted(neg_common, key=lambda x: neg_counter[x], reverse=True)[:top_n]
 
 
-            # FILTER GENERIC PHRASES
-            relative_freq = freq_main / total_main
-
-            if relative_freq < 0.01:
-                continue
-
-
-            if score < 2:
-                continue
-
-
-            results.append((score, freq_main, phrase))
-
-
-
-        results.sort(reverse=True)
-
-
-        return [phrase for score, freq, phrase in results[:top_n]]
-
-
-
-    top_pos = distinctive(pos_counter, neg_counter, pos_count)
-
-    top_neg = distinctive(neg_counter, pos_counter, neg_count)
-
+    pos_count = int(sum(preds))
+    neg_count = int(len(preds) - pos_count)
 
 
     return {
 
-        "dominant_sentiment": dominant,
-
+        "dominant_sentiment":
+        "Positif" if pos_count >= neg_count else "Negatif",
         "counts": {
-
             "Positif": pos_count,
-
             "Negatif": neg_count,
-
         },
 
-        "top_bigrams": {
-
-            "Positif": top_pos,
-
-            "Negatif": top_neg,
-
-        },
-
+        "top_phrases": {
+            "Positif": pos_common,
+            "Negatif": neg_common,
+        }
     }
 
 model = joblib.load('naive_bayes_model.pkl')
 vectorizer = joblib.load('tfidf_vectorizer.pkl')
+kw_model = KeyBERT(
+    SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+)
 
 app = Flask(__name__)
 CORS(app, resources={r"/analyze": {"origins": "*"}, r"/stream/*": {"origins": "*"}, r"/progress/*": {"origins": "*"}, r"/download/*": {"origins": "*"}})
@@ -438,15 +383,15 @@ def _run_analysis_job(job_id, shortlink):
         X_final = hstack([X_text, X_cat])
         preds = model.predict(X_final)
 
+        probs = None
+        try:
+            if hasattr(model, "predict_proba"):
+                probs = model.predict_proba(X_final)
+        except Exception:
+            probs = None
+
         set_progress(job_id, percent=85, message="Meringkas kata dominan per sentimen...")
-        summary = summarize_top_terms_by_sentiment(
-            X_text,
-            preds,
-            vectorizer,
-            texts_preprocessed=texts_preprocessed,
-            reviews=reviews,
-            top_n=15,
-        )
+        summary = summarize_with_keybert(reviews, preds)
 
         items = []
         for i, (review, p) in enumerate(zip(reviews, preds), start=1):
@@ -495,7 +440,7 @@ def progress(job_id):
     payload = {"status": st.get("status"), "percent": st.get("percent"), "message": st.get("message"), "ts": st.get("ts")}
     if st.get("status") in ("completed", "failed") and st.get("data") is not None:
         payload["result"] = st["data"]
-    return jsonify(payload)
+    return jsonify(_to_builtin(payload))
 
 @app.get('/stream/<job_id>')
 def stream(job_id):
@@ -505,16 +450,16 @@ def stream(job_id):
             with PROGRESS_LOCK:
                 st = PROGRESS.get(job_id)
             if not st:
-                yield f"data: {json.dumps({'error': 'unknown job_id'})}\n\n"
+                yield f"data: {_json_dumps({'error': 'unknown job_id'})}\n\n"
                 break
             payload = {"status": st.get("status"), "percent": st.get("percent"), "message": st.get("message"), "ts": st.get("ts")}
             if payload != last_payload:
-                yield f"data: {json.dumps(payload)}\n\n"
+                yield f"data: {_json_dumps(payload)}\n\n"
                 last_payload = payload
             if st.get("status") in ("completed", "failed"):
                 # send final data when completed
                 if st.get("data") is not None:
-                    yield f"data: {json.dumps({'status': st['status'], 'percent': st['percent'], 'message': st['message'], 'ts': st.get('ts'), 'result': st['data']})}\n\n"
+                    yield f"data: {_json_dumps({'status': st['status'], 'percent': st['percent'], 'message': st['message'], 'ts': st.get('ts'), 'result': st['data']})}\n\n"
                 break
             time.sleep(0.1)
     return Response(
@@ -583,26 +528,26 @@ def download_pdf(job_id):
     elements.append(meta_table)
     elements.append(Spacer(1, 12))
 
-    top_bi = summary.get("top_bigrams") or {}
-    pos_bi = top_bi.get("Positif") or []
-    neg_bi = top_bi.get("Negatif") or []
-    if pos_bi or neg_bi:
-        elements.append(Paragraph("Ringkasan frasa dominan (bigram, frekuensi)", styles['Heading3']))
-        bi_rows = [[Paragraph("Positif (top)", styles['BodyText']), Paragraph("Negatif (top)", styles['BodyText'])]]
-        max_rows = max(len(pos_bi), len(neg_bi), 1)
+    top_ph = summary.get("top_phrases") or {}
+    pos_ph = top_ph.get("Positif") or []
+    neg_ph = top_ph.get("Negatif") or []
+    if pos_ph or neg_ph:
+        elements.append(Paragraph("Ringkasan frasa dominan", styles['Heading3']))
+        ph_rows = [[Paragraph("Positif (top)", styles['BodyText']), Paragraph("Negatif (top)", styles['BodyText'])]]
+        max_rows = max(len(pos_ph), len(neg_ph), 1)
         for i in range(max_rows):
-            p = pos_bi[i] if i < len(pos_bi) else ""
-            n = neg_bi[i] if i < len(neg_bi) else ""
-            bi_rows.append([Paragraph(p, styles['BodyText']), Paragraph(n, styles['BodyText'])])
-        bi_table = Table(bi_rows, repeatRows=1, hAlign='LEFT', colWidths=[240, 240])
-        bi_table.setStyle(TableStyle([
+            p = pos_ph[i] if i < len(pos_ph) else ""
+            n = neg_ph[i] if i < len(neg_ph) else ""
+            ph_rows.append([Paragraph(p, styles['BodyText']), Paragraph(n, styles['BodyText'])])
+        ph_table = Table(ph_rows, repeatRows=1, hAlign='LEFT', colWidths=[240, 240])
+        ph_table.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
             ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
             ('FONTSIZE', (0,0), (-1,-1), 9),
         ]))
-        elements.append(bi_table)
+        elements.append(ph_table)
         elements.append(Spacer(1, 12))
 
     rl_img = RLImage(chart_bytes, width=250, height=250)

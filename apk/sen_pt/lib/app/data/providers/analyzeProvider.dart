@@ -35,7 +35,8 @@ class AnalysisProvider extends GetConnect {
       final resultSig = (p.result == null)
           ? 'nores'
           : 'res:${p.result!.count}:${p.result!.categoryEncoded}:${p.result!.category}';
-      final key = '${p.ts.toIso8601String()}|${p.percent}|${p.message}|$resultSig';
+      final resumeSig = 'resume:${p.resume.positif}:${p.resume.negatif}:${p.resume.topPhrasesPositif.length}:${p.resume.topPhrasesNegatif.length}';
+      final key = '${p.ts.toIso8601String()}|${p.percent}|${p.message}|$resultSig|$resumeSig';
       if (key == lastKey) return;
       lastKey = key;
       controller.add(p);
