@@ -256,73 +256,50 @@ def summarize_with_keybert(reviews, preds, top_n=10):
     pos_phrases_all = []
     neg_phrases_all = []
 
-
-    # Extract keyword PER REVIEW
     for review, pred in zip(reviews, preds):
 
-        keywords = kw_model.extract_keywords(
+        # split review jadi kalimat
+        sentences = nltk.sent_tokenize(review)
 
-            review,
+        for sentence in sentences:
 
-            keyphrase_ngram_range=(2,3),
+            keywords = kw_model.extract_keywords(
+                sentence,
+                keyphrase_ngram_range=(1,3),
+                stop_words=None,
+                top_n=2
+            )
 
-            stop_words=None,
+            phrases = [kw for kw, score in keywords]
 
-            top_n=3   # batasi per review
+            if pred == 1:
+                pos_phrases_all.extend(phrases)
+            else:
+                neg_phrases_all.extend(phrases)
 
-        )
-
-
-        phrases = [kw for kw, score in keywords]
-
-
-        if pred == 1:
-
-            pos_phrases_all.extend(phrases)
-
-        else:
-
-            neg_phrases_all.extend(phrases)
-
-
-
-    # Hitung frekuensi
+    # hitung frekuensi
     pos_counter = Counter(pos_phrases_all)
     neg_counter = Counter(neg_phrases_all)
 
-
-    # Filter minimal muncul 2x agar spam hilang
+    # ambil top
     pos_common = [
-
-        phrase for phrase, count in pos_counter.items()
-
-        if count >= 2
-
+        phrase for phrase, count in pos_counter.most_common(top_n)
     ]
 
     neg_common = [
-
-        phrase for phrase, count in neg_counter.items()
-
-        if count >= 2
-
+        phrase for phrase, count in neg_counter.most_common(top_n)
     ]
 
-
-    # Sort berdasarkan frekuensi
-    pos_common = sorted(pos_common, key=lambda x: pos_counter[x], reverse=True)[:top_n]
-
-    neg_common = sorted(neg_common, key=lambda x: neg_counter[x], reverse=True)[:top_n]
-
-
+    # hitung jumlah sentiment (tetap dari review, bukan kalimat)
     pos_count = int(sum(preds))
     neg_count = int(len(preds) - pos_count)
 
-
+    # RETURN TETAP SAMA FORMAT ANDA
     return {
 
         "dominant_sentiment":
         "Positif" if pos_count >= neg_count else "Negatif",
+
         "counts": {
             "Positif": pos_count,
             "Negatif": neg_count,
