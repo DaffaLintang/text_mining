@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:get/get_state_manager/src/rx_flutter/rx_obx_widget.dart';
+import 'package:get/get.dart';
 import 'package:sen_pt/app/modules/landingPage/controllers/landing_page_controller.dart';
 
 class ProgressModal extends StatelessWidget {
@@ -30,32 +30,40 @@ class ProgressModal extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Icon animasi
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF6C63FF), Color(0xFF48CAE4)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF6C63FF).withAlpha(60),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+              // Loading Indicator
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                   SizedBox(
+                    width: 80,
+                    height: 80,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 6,
+                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF6C63FF)),
+                      backgroundColor: const Color(0xFF6C63FF).withAlpha(30),
                     ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.auto_graph_rounded,
-                  color: Colors.white,
-                  size: 28,
-                ),
+                  ),
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF6C63FF), Color(0xFF48CAE4)],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF6C63FF).withAlpha(60),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.auto_graph_rounded, color: Colors.white, size: 24),
+                  ),
+                ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 25),
               const Text(
                 'Sedang Memproses...',
                 style: TextStyle(

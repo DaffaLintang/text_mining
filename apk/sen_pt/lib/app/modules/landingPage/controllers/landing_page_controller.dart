@@ -6,6 +6,7 @@ import 'package:sen_pt/app/data/providers/analyzeProvider.dart';
 import 'package:sen_pt/app/modules/home/controllers/home_controller.dart';
 import 'package:sen_pt/app/widgets/progressModal.dart';
 import 'package:sen_pt/app/modules/resultPage/controllers/result_page_controller.dart';
+import 'package:sen_pt/app/data/services/notification_service.dart';
 
 class LandingPageController extends GetxController {
   //TODO: Implement LandingPageController
@@ -75,6 +76,15 @@ class LandingPageController extends GetxController {
           _progressSub = stream.listen((AnalysisProgress data) {
             percent.value = data.percent;
             message.value = data.message;
+            
+            // Update notification
+            NotificationService.showProgressNotification(
+              id: 888,
+              title: 'Analisis Sedang Berjalan',
+              body: data.message.isEmpty ? 'Memproses... ${data.percent}%' : '${data.message} (${data.percent}%)',
+              progress: data.percent,
+              maxProgress: 100,
+            );
             try {
               Get.find<ResultPageController>().updateFromResume(data.resume);
             } catch (_) {}
@@ -102,6 +112,7 @@ class LandingPageController extends GetxController {
               }
               Get.snackbar('Gagal', data.message.isEmpty ? 'Terjadi kesalahan.' : data.message,
                   backgroundColor: Colors.red, colorText: Colors.white);
+              NotificationService.cancelNotification(888);
               _progressSub?.cancel();
               return;
             }
@@ -122,6 +133,8 @@ class LandingPageController extends GetxController {
                 duration: const Duration(milliseconds: 400),
                 curve: Curves.easeOutQuad,
               );
+              
+              NotificationService.cancelNotification(888);
             }
           }, onError: (e, st) {
             print('Progress stream error: $e');

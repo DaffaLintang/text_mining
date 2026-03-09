@@ -1,4 +1,4 @@
-final String baseApiUrl = "https://c13b-116-254-97-62.ngrok-free.app";
+final String baseApiUrl = "http://202.155.18.28:5000";
 
 final String analyzeUrl = "${baseApiUrl}/analyze";
 final String progressUrl = "${baseApiUrl}/stream";
