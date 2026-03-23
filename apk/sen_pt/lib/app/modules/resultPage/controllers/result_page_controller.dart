@@ -12,6 +12,11 @@ class ResultPageController extends GetxController {
   final sentimen = <String>[].obs;
   final positifCount = 0.obs;
   final negatifCount = 0.obs;
+  final star1Count = 0.obs;
+  final star2Count = 0.obs;
+  final star3Count = 0.obs;
+  final star4Count = 0.obs;
+  final star5Count = 0.obs;
   final topPhrasesPositif = <String>[].obs;
   final topPhrasesNegatif = <String>[].obs;
   final jobId = ''.obs;
@@ -51,6 +56,14 @@ class ResultPageController extends GetxController {
     }
     topPhrasesPositif.assignAll(resume.topPhrasesPositif);
     topPhrasesNegatif.assignAll(resume.topPhrasesNegatif);
+  }
+
+  void updateFromStart(Start start) {
+    star1Count.value = start.star1;
+    star2Count.value = start.star2;
+    star3Count.value = start.star3;
+    star4Count.value = start.star4;
+    star5Count.value = start.star5;
   }
 
   void downloadPdf([String? inJobId, String? inFilename]) async {

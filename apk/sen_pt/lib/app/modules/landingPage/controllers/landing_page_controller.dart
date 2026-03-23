@@ -88,6 +88,9 @@ class LandingPageController extends GetxController {
             try {
               Get.find<ResultPageController>().updateFromResume(data.resume);
             } catch (_) {}
+            try {
+              Get.find<ResultPageController>().updateFromStart(data.start);
+            } catch (_) {}
             // Push incremental result if present
             if (data.result != null) {
               try {

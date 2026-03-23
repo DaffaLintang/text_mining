@@ -76,7 +76,8 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
     chrome_options.add_argument(
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36"
     )
-    service = Service(ChromeDriverManager().install())
+    chrome_options.binary_location = "/usr/bin/google-chrome"
+    service = Service("/usr/bin/chromedriver")
     driver = webdriver.Chrome(service=service, options=chrome_options)
     try:
         driver.get(shortlink)
@@ -104,6 +105,8 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
         time.sleep(5)
 
         all_reviews = []
+        all_stars = []
+        star_counts = {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
         category = ""
         productName = product_name
         while True:
@@ -170,6 +173,24 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
                     review_text = review.text.strip()
                     if review_text and review_text not in all_reviews:
                         all_reviews.append(review_text)
+                        
+                        stars = 0
+                        try:
+                            try:
+                                container = review.find_element(By.XPATH, "./ancestor::article[1]")
+                                star_container = container.find_element(By.XPATH, ".//div[@data-testid='icnStarRating']")
+                            except Exception:
+                                star_container = review.find_element(By.XPATH, "./ancestor::*[.//div[@data-testid='icnStarRating'] and not(descendant::span[@data-testid='lblItemUlasan'][2])][1]//div[@data-testid='icnStarRating']")
+                            
+                            svgs = star_container.find_elements(By.XPATH, ".//*[local-name()='svg' and @fill='var(--YN300, #FFD45F)']")
+                            stars = len(svgs)
+                        except Exception:
+                            pass
+                        
+                        if 1 <= stars <= 5:
+                            star_counts[str(stars)] += 1
+                        all_stars.append(stars)
+
                         if on_progress:
                             try:
                                 on_progress(len(all_reviews))
@@ -191,7 +212,7 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
             except Exception as e:
                 logging.error(f"Error saat mengambil review: {type(e).__name__}: {e!r}")
                 break
-        return all_reviews, category, productName
+        return all_reviews, category, productName, star_counts, all_stars
     finally:
         driver.quit()
 
@@ -340,12 +361,12 @@ def _run_analysis_job(job_id, shortlink):
         set_progress(job_id, status="running", percent=5, message="Resolving shortlink...")
         def _scrape_progress(n):
             set_progress(job_id, message=f"Sudah berhasil mengambil {n} data")
-        reviews, category_name, product_name = get_reviews_and_category(shortlink, on_progress=_scrape_progress)
+        reviews, category_name, product_name, star_counts, all_stars = get_reviews_and_category(shortlink, on_progress=_scrape_progress)
         set_progress(job_id, percent=30, message=f"Scraped {len(reviews)} reviews; preprocessing...")
 
         texts_preprocessed = [preprocess_text(r) for r in reviews]
         if not texts_preprocessed:
-            set_progress(job_id, status="completed", percent=100, message="No reviews found", data={"category": category_name, "product_name": product_name, "items": []})
+            set_progress(job_id, status="completed", percent=100, message="No reviews found", data={"category": category_name, "product_name": product_name, "star_counts": star_counts, "items": []})
             return
 
         set_progress(job_id, percent=55, message="Vectorizing...")
@@ -368,9 +389,9 @@ def _run_analysis_job(job_id, shortlink):
         summary = summarize_with_keybert(reviews, preds)
 
         items = []
-        for i, (review, p) in enumerate(zip(reviews, preds), start=1):
+        for i, (review, p, s) in enumerate(zip(reviews, preds, all_stars), start=1):
             label = "Positif" if p == 1 else ("Negatif" if p == 0 else str(p))
-            items.append({"sentiment": label, "review": review})
+            items.append({"sentiment": label, "review": review, "stars": s})
             # Optional fine-grained progress
             set_progress(job_id, percent=75 + int(20 * (i/len(reviews))), message=f"Sudah berhasil mengambil {i} data")
 
@@ -381,6 +402,7 @@ def _run_analysis_job(job_id, shortlink):
             "count": len(items),
             "items": items,
             "summary": summary,
+            "star_counts": star_counts,
         }
         set_progress(job_id, status="completed", percent=100, message="Done", data=result)
     except Exception as e:
@@ -502,6 +524,27 @@ def download_pdf(job_id):
     elements.append(meta_table)
     elements.append(Spacer(1, 12))
 
+    star_counts = data.get("star_counts", {})
+    if star_counts:
+        elements.append(Paragraph("Distribusi Bintang", styles['Heading3']))
+        star_data = [
+            ["Bintang 5", str(star_counts.get("5", 0))],
+            ["Bintang 4", str(star_counts.get("4", 0))],
+            ["Bintang 3", str(star_counts.get("3", 0))],
+            ["Bintang 2", str(star_counts.get("2", 0))],
+            ["Bintang 1", str(star_counts.get("1", 0))],
+        ]
+        star_table = Table(star_data, hAlign='LEFT')
+        star_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('BACKGROUND', (0,0), (0,-1), colors.whitesmoke),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+        ]))
+        elements.append(star_table)
+        elements.append(Spacer(1, 12))
+
     top_ph = summary.get("top_phrases") or {}
     pos_ph = top_ph.get("Positif") or []
     neg_ph = top_ph.get("Negatif") or []
@@ -527,12 +570,13 @@ def download_pdf(job_id):
     rl_img = RLImage(chart_bytes, width=250, height=250)
     elements.append(rl_img)
     elements.append(Spacer(1, 12))
-    data_rows = [[Paragraph("sentiment", styles['BodyText']), Paragraph("review", styles['BodyText'])]]
+    data_rows = [[Paragraph("sentiment", styles['BodyText']), Paragraph("rating", styles['BodyText']), Paragraph("review", styles['BodyText'])]]
     for it in items:
         s = it.get("sentiment", "")
+        rating = str(it.get("stars", 0))
         r = it.get("review", "")
-        data_rows.append([Paragraph(s, styles['BodyText']), Paragraph(r, styles['BodyText'])])
-    table = Table(data_rows, repeatRows=1, hAlign='LEFT', colWidths=[80, 400])
+        data_rows.append([Paragraph(s, styles['BodyText']), Paragraph(rating, styles['BodyText']), Paragraph(r, styles['BodyText'])])
+    table = Table(data_rows, repeatRows=1, hAlign='LEFT', colWidths=[60, 40, 380])
     table.setStyle(TableStyle([
         ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
         ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),

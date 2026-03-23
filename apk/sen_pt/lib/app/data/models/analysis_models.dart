@@ -5,6 +5,7 @@ class AnalysisProgress {
   final DateTime ts;
   final AnalysisResult? result;
   final Resume resume;
+  final Start start;
 
   AnalysisProgress({
     required this.status,
@@ -13,6 +14,7 @@ class AnalysisProgress {
     required this.ts,
     this.result,
     required this.resume,
+    required this.start,
   });
 
   factory AnalysisProgress.fromJson(Map<String, dynamic> json) {
@@ -28,7 +30,9 @@ class AnalysisProgress {
 
     DateTime parseTs(dynamic v) {
       if (v is String) {
-        try { return DateTime.parse(v); } catch (_) {}
+        try {
+          return DateTime.parse(v);
+        } catch (_) {}
       }
       if (v is int) {
         // seconds vs millis heuristic
@@ -52,11 +56,27 @@ class AnalysisProgress {
     AnalysisResult? parseResult(dynamic v) {
       if (v is Map<String, dynamic>) {
         // Only parse when expected fields exist
-        if (v.containsKey('category') && v.containsKey('category_encoded') && v.containsKey('count') && v.containsKey('items')) {
-          try { return AnalysisResult.fromJson(v); } catch (_) {}
+        if (v.containsKey('category') &&
+            v.containsKey('category_encoded') &&
+            v.containsKey('count') &&
+            v.containsKey('items')) {
+          try {
+            return AnalysisResult.fromJson(v);
+          } catch (_) {}
         }
       }
       return null;
+    }
+
+    Start parseStart(Map<String, dynamic> jsonRoot) {
+      final dynamic resultObj = jsonRoot['result'];
+      if (resultObj is Map<String, dynamic>) {
+        final dynamic starCountsObj = resultObj['star_counts'];
+        if (starCountsObj is Map<String, dynamic>) {
+          try { return Start.fromJson(starCountsObj); } catch (_) {}
+        }
+      }
+      return const Start.empty();
     }
 
     Resume parseResume(Map<String, dynamic> jsonRoot) {
@@ -65,12 +85,16 @@ class AnalysisProgress {
       if (resultObj is Map<String, dynamic>) {
         final dynamic summaryObj = resultObj['summary'];
         if (summaryObj is Map<String, dynamic>) {
-          try { return Resume.fromJson(summaryObj); } catch (_) {}
+          try {
+            return Resume.fromJson(summaryObj);
+          } catch (_) {}
         }
       }
       final dynamic resumeObj = jsonRoot['resume'];
       if (resumeObj is Map<String, dynamic>) {
-        try { return Resume.fromJson(resumeObj); } catch (_) {}
+        try {
+          return Resume.fromJson(resumeObj);
+        } catch (_) {}
       }
       return const Resume.empty();
     }
@@ -82,6 +106,7 @@ class AnalysisProgress {
       ts: parseTs(json['ts']),
       result: parseResult(json['result']),
       resume: parseResume(json),
+      start: parseStart(json),
     );
   }
 }
@@ -104,15 +129,17 @@ class Resume {
   });
 
   const Resume.empty()
-      : dominantSentiment = '',
-        positif = 0,
-        negatif = 0,
-        topPhrasesPositif = const [],
-        topPhrasesNegatif = const [];
+    : dominantSentiment = '',
+      positif = 0,
+      negatif = 0,
+      topPhrasesPositif = const [],
+      topPhrasesNegatif = const [];
 
   factory Resume.fromJson(Map<String, dynamic> json) {
     final counts = (json['counts'] is Map) ? (json['counts'] as Map) : const {};
-    final topPhrases = (json['top_phrases'] is Map) ? (json['top_phrases'] as Map) : const {};
+    final topPhrases = (json['top_phrases'] is Map)
+        ? (json['top_phrases'] as Map)
+        : const {};
 
     int _asInt(dynamic v) {
       if (v is int) return v;
@@ -172,16 +199,62 @@ class AnalysisResult {
 class AnalysisItem {
   final String sentiment;
   final String review;
+  final int stars;
 
   AnalysisItem({
     required this.sentiment,
     required this.review,
+    this.stars = 0,
   });
 
   factory AnalysisItem.fromJson(Map<String, dynamic> json) {
     return AnalysisItem(
       sentiment: json['sentiment'],
       review: json['review'],
+      stars: json['stars'] ?? 0,
+    );
+  }
+}
+
+class Start {
+  final int star1;
+  final int star2;
+  final int star3;
+  final int star4;
+  final int star5;
+
+  const Start({
+    required this.star1,
+    required this.star2,
+    required this.star3,
+    required this.star4,
+    required this.star5,
+  });
+
+  const Start.empty()
+      : star1 = 0,
+        star2 = 0,
+        star3 = 0,
+        star4 = 0,
+        star5 = 0;
+
+  factory Start.fromJson(Map<String, dynamic> json) {
+    int _asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is double) return v.round();
+      if (v is String) {
+        final n = int.tryParse(v);
+        return n ?? 0;
+      }
+      return 0;
+    }
+
+    return Start(
+      star1: _asInt(json['1']),
+      star2: _asInt(json['2']),
+      star3: _asInt(json['3']),
+      star4: _asInt(json['4']),
+      star5: _asInt(json['5']),
     );
   }
 }
