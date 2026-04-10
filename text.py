@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import numpy as np
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -76,8 +77,10 @@ def get_reviews_and_category(shortlink: str, on_progress=None):
     chrome_options.add_argument(
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36"
     )
-    chrome_options.binary_location = "/usr/bin/google-chrome"
-    service = Service("/usr/bin/chromedriver")
+    # chrome_options.binary_location = "/usr/bin/google-chrome"
+    # service = Service("/usr/bin/chromedriver")
+    # Gunakan ChromeDriverManager untuk OS Windows agar tidak hardcode path linux
+    service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
     try:
         driver.get(shortlink)
@@ -258,6 +261,10 @@ try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
     nltk.download('punkt')
+try:
+    nltk.data.find('sentiment/vader_lexicon.zip')
+except LookupError:
+    nltk.download('vader_lexicon')
 stop_words = set(stopwords.words('indonesian'))
 
 def preprocess_text(text):
@@ -336,7 +343,7 @@ kw_model = KeyBERT(
 )
 
 app = Flask(__name__)
-CORS(app, resources={r"/analyze": {"origins": "*"}, r"/stream/*": {"origins": "*"}, r"/progress/*": {"origins": "*"}, r"/download/*": {"origins": "*"}})
+CORS(app, resources={r"/analyze": {"origins": "*"}, r"/analyze_vader": {"origins": "*"}, r"/stream/*": {"origins": "*"}, r"/progress/*": {"origins": "*"}, r"/download/*": {"origins": "*"}})
 
 # In-memory job progress store
 PROGRESS = {}
@@ -409,6 +416,54 @@ def _run_analysis_job(job_id, shortlink):
         tb = traceback.format_exc()
         set_progress(job_id, status="failed", percent=100, message=str(e) or "Unhandled error", data={"error": str(e), "traceback": tb})
 
+def _run_vader_analysis_job(job_id, shortlink):
+    try:
+        set_progress(job_id, status="running", percent=5, message="Resolving shortlink...")
+        def _scrape_progress(n):
+            set_progress(job_id, message=f"Sudah berhasil mengambil {n} data")
+        reviews, category_name, product_name, star_counts, all_stars = get_reviews_and_category(shortlink, on_progress=_scrape_progress)
+        set_progress(job_id, percent=30, message=f"Scraped {len(reviews)} reviews; analyzing with VADER...")
+
+        if not reviews:
+            set_progress(job_id, status="completed", percent=100, message="No reviews found", data={"category": category_name, "product_name": product_name, "star_counts": star_counts, "items": []})
+            return
+
+        set_progress(job_id, percent=55, message="Predicting sentiments with VADER...")
+        sia = SentimentIntensityAnalyzer()
+        
+        preds = []
+        for review in reviews:
+            score = sia.polarity_scores(review)
+            # Threshold: >= 0.0 diubah jadi Positif (1) agar cocok dengan return format
+            if score['compound'] >= 0:
+                preds.append(1)
+            else:
+                preds.append(0)
+
+        set_progress(job_id, percent=85, message="Meringkas kata dominan per sentimen...")
+        summary = summarize_with_keybert(reviews, preds)
+
+        items = []
+        for i, (review, p, s) in enumerate(zip(reviews, preds, all_stars), start=1):
+            label = "Positif" if p == 1 else "Negatif"
+            items.append({"sentiment": label, "review": review, "stars": s})
+            # Optional fine-grained progress
+            set_progress(job_id, percent=85 + int(15 * (i/len(reviews))), message=f"Sudah berhasil memproses {i} data")
+
+        result = {
+            "category": category_name,
+            "category_encoded": category_map.get(category_name, 20),
+            "product_name": product_name,
+            "count": len(items),
+            "items": items,
+            "summary": summary,
+            "star_counts": star_counts,
+        }
+        set_progress(job_id, status="completed", percent=100, message="Done", data=result)
+    except Exception as e:
+        tb = traceback.format_exc()
+        set_progress(job_id, status="failed", percent=100, message=str(e) or "Unhandled error", data={"error": str(e), "traceback": tb})
+
 @app.post('/analyze')
 def analyze():
     data = request.get_json(silent=True) or {}
@@ -419,6 +474,24 @@ def analyze():
     job_id = uuid.uuid4().hex
     set_progress(job_id, status="queued", percent=0, message="Job queued")
     t = threading.Thread(target=_run_analysis_job, args=(job_id, shortlink), daemon=True)
+    t.start()
+    base = request.host_url.rstrip('/')
+    return jsonify({
+        "job_id": job_id,
+        "progress_url": f"{base}/progress/{job_id}",
+        "stream_url": f"{base}/stream/{job_id}"
+    }), 202
+
+@app.post('/analyze_vader')
+def analyze_vader():
+    data = request.get_json(silent=True) or {}
+    shortlink = data.get('shortlink')
+    if not shortlink:
+        return jsonify({"error": "shortlink is required"}), 400
+
+    job_id = uuid.uuid4().hex
+    set_progress(job_id, status="queued", percent=0, message="Job queued")
+    t = threading.Thread(target=_run_vader_analysis_job, args=(job_id, shortlink), daemon=True)
     t.start()
     base = request.host_url.rstrip('/')
     return jsonify({
