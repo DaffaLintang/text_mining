@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 
 class SubmitButton extends StatefulWidget {
-  const SubmitButton({super.key, required this.onPressed});
+  const SubmitButton({
+    super.key,
+    required this.onPressed,
+    this.label = 'Analisis',
+    this.colors = const [Color(0xFF6C63FF), Color(0xFF48CAE4)],
+  });
 
   final VoidCallback onPressed;
+  final String label;
+  final List<Color> colors;
 
   @override
   State<SubmitButton> createState() => _SubmitButtonState();
@@ -50,27 +57,27 @@ class _SubmitButtonState extends State<SubmitButton>
           height: 54,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF6C63FF), Color(0xFF48CAE4)],
+            gradient: LinearGradient(
+              colors: widget.colors,
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
             ),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF6C63FF).withAlpha(80),
+                color: widget.colors.first.withAlpha(80),
                 blurRadius: 16,
                 offset: const Offset(0, 6),
               ),
             ],
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.analytics_outlined, color: Colors.white, size: 20),
-              SizedBox(width: 8),
+              const Icon(Icons.analytics_outlined, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
               Text(
-                'Analisis',
-                style: TextStyle(
+                widget.label,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,

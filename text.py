@@ -434,8 +434,17 @@ def _run_vader_analysis_job(job_id, shortlink):
         preds = []
         for review in reviews:
             score = sia.polarity_scores(review)
-            # Threshold: >= 0.0 diubah jadi Positif (1) agar cocok dengan return format
-            if score['compound'] >= 0:
+            
+            scores_dict = {'Positif': score['pos'], 'Negatif': score['neg'], 'Netral': score['neu']}
+            sentiment_label = max(scores_dict, key=scores_dict.get)
+            
+            # Map 'Netral' to 'Positif'
+            if sentiment_label in ['Positif', 'Netral']:
+                sentiment_label = 'Positif'
+            
+            logging.info(f"[VADER] Scores: neg={score['neg']}, neu={score['neu']}, pos={score['pos']}, compound={score['compound']} -> mapped to {sentiment_label} | Review: {review[:80]}...")
+            
+            if sentiment_label == 'Positif':
                 preds.append(1)
             else:
                 preds.append(0)

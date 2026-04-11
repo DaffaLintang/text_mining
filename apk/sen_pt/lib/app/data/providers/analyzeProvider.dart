@@ -3,16 +3,25 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:get/get.dart';
-import 'package:sen_pt/app/data/ApiVar.dart';
+import 'package:sen_pt/app/data/apiVar.dart';
 import 'package:sen_pt/app/data/models/analysis_models.dart';
 import 'package:sen_pt/app/data/models/inputLink_models.dart';
 
-
 class AnalysisProvider extends GetConnect {
-
   // Buat job baru
   Future<AnalysisJob?> createJob(Map<String, dynamic> payload) async {
     final response = await post(analyzeUrl, payload);
+
+    if (response.status.hasError) {
+      print('Error: ${response.body}');
+      return null;
+    }
+
+    return AnalysisJob.fromJson(response.body);
+  }
+
+  Future<AnalysisJob?> createJobVader(Map<String, dynamic> payload) async {
+    final response = await post(analyzeUrlVader, payload);
 
     if (response.status.hasError) {
       print('Error: ${response.body}');
@@ -35,8 +44,10 @@ class AnalysisProvider extends GetConnect {
       final resultSig = (p.result == null)
           ? 'nores'
           : 'res:${p.result!.count}:${p.result!.categoryEncoded}:${p.result!.category}';
-      final resumeSig = 'resume:${p.resume.positif}:${p.resume.negatif}:${p.resume.topPhrasesPositif.length}:${p.resume.topPhrasesNegatif.length}';
-      final key = '${p.ts.toIso8601String()}|${p.percent}|${p.message}|$resultSig|$resumeSig';
+      final resumeSig =
+          'resume:${p.resume.positif}:${p.resume.negatif}:${p.resume.topPhrasesPositif.length}:${p.resume.topPhrasesNegatif.length}';
+      final key =
+          '${p.ts.toIso8601String()}|${p.percent}|${p.message}|$resultSig|$resumeSig';
       if (key == lastKey) return;
       lastKey = key;
       controller.add(p);
@@ -79,11 +90,15 @@ class AnalysisProvider extends GetConnect {
                   print('SSE payload: $payload');
                   final map = jsonDecode(payload) as Map<String, dynamic>;
                   final progress = AnalysisProgress.fromJson(map);
-                  print('Parsed progress: ${progress.percent} - ${progress.message}');
+                  print(
+                    'Parsed progress: ${progress.percent} - ${progress.message}',
+                  );
                   emitOnce(progress);
                   // Stop reconnecting on terminal states
                   final st = progress.status.toLowerCase();
-                  if (progress.percent >= 100 || st == 'completed' || st == 'failed') {
+                  if (progress.percent >= 100 ||
+                      st == 'completed' ||
+                      st == 'failed') {
                     canceled = true;
                   }
                 } catch (e) {
@@ -105,42 +120,57 @@ class AnalysisProvider extends GetConnect {
         }
 
         late StreamSubscription<List<int>> sub;
-        sub = response.listen((chunk) {
-          buffer.write(utf8.decode(chunk, allowMalformed: true));
-          processBuffer();
-        }, onError: (e, st) async {
-          print('SSE error: $e');
-          await sub.cancel();
-          if (!canceled) {
-            final delay = Duration(milliseconds: (1000 * (1 << (attempt > 5 ? 5 : attempt))));
-            print('Reconnecting SSE in ${delay.inMilliseconds} ms (attempt ${attempt + 1})');
-            await Future.delayed(delay);
-            connect(attempt: attempt + 1);
-          }
-        }, onDone: () async {
-          buffer.write('\n');
-          processBuffer();
-          // Flush remaining event
-          if (dataEvent.isNotEmpty) {
-            final payload = dataEvent.toString();
-            dataEvent.clear();
-            try {
-              print('Final SSE payload: $payload');
-              final map = jsonDecode(payload) as Map<String, dynamic>;
-              final progress = AnalysisProgress.fromJson(map);
-              print('Final parsed progress: ${progress.percent} - ${progress.message}');
-              emitOnce(progress);
-            } catch (e) {
-              print('Final SSE parse error: $e');
+        sub = response.listen(
+          (chunk) {
+            buffer.write(utf8.decode(chunk, allowMalformed: true));
+            processBuffer();
+          },
+          onError: (e, st) async {
+            print('SSE error: $e');
+            await sub.cancel();
+            if (!canceled) {
+              final delay = Duration(
+                milliseconds: (1000 * (1 << (attempt > 5 ? 5 : attempt))),
+              );
+              print(
+                'Reconnecting SSE in ${delay.inMilliseconds} ms (attempt ${attempt + 1})',
+              );
+              await Future.delayed(delay);
+              connect(attempt: attempt + 1);
             }
-          }
-          if (!canceled) {
-            final delay = Duration(milliseconds: (1000 * (1 << (attempt > 5 ? 5 : attempt))));
-            print('SSE done, reconnecting in ${delay.inMilliseconds} ms (attempt ${attempt + 1})');
-            await Future.delayed(delay);
-            connect(attempt: attempt + 1);
-          }
-        }, cancelOnError: true);
+          },
+          onDone: () async {
+            buffer.write('\n');
+            processBuffer();
+            // Flush remaining event
+            if (dataEvent.isNotEmpty) {
+              final payload = dataEvent.toString();
+              dataEvent.clear();
+              try {
+                print('Final SSE payload: $payload');
+                final map = jsonDecode(payload) as Map<String, dynamic>;
+                final progress = AnalysisProgress.fromJson(map);
+                print(
+                  'Final parsed progress: ${progress.percent} - ${progress.message}',
+                );
+                emitOnce(progress);
+              } catch (e) {
+                print('Final SSE parse error: $e');
+              }
+            }
+            if (!canceled) {
+              final delay = Duration(
+                milliseconds: (1000 * (1 << (attempt > 5 ? 5 : attempt))),
+              );
+              print(
+                'SSE done, reconnecting in ${delay.inMilliseconds} ms (attempt ${attempt + 1})',
+              );
+              await Future.delayed(delay);
+              connect(attempt: attempt + 1);
+            }
+          },
+          cancelOnError: true,
+        );
 
         controller.onCancel = () async {
           canceled = true;
@@ -149,8 +179,12 @@ class AnalysisProvider extends GetConnect {
       } catch (e) {
         print('SSE connect error: $e');
         if (!canceled) {
-          final delay = Duration(milliseconds: (1000 * (1 << (attempt > 5 ? 5 : attempt))));
-          print('Reconnect after error in ${delay.inMilliseconds} ms (attempt ${attempt + 1})');
+          final delay = Duration(
+            milliseconds: (1000 * (1 << (attempt > 5 ? 5 : attempt))),
+          );
+          print(
+            'Reconnect after error in ${delay.inMilliseconds} ms (attempt ${attempt + 1})',
+          );
           await Future.delayed(delay);
           connect(attempt: attempt + 1);
         }
@@ -162,5 +196,4 @@ class AnalysisProvider extends GetConnect {
 
     return controller.stream;
   }
-
 }

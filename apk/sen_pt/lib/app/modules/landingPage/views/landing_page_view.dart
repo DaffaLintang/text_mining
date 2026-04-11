@@ -15,14 +15,35 @@ class LandingPageView extends GetView<LandingPageController> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
-            mainAxisSize: MainAxisSize.min,  
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Link Produk', style: TextStyle(fontSize: 20, 
-              fontWeight: FontWeight.bold)),
+              Text(
+                'Link Produk',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
               SizedBox(height: 10),
-              LinkTextField(controller:   controller.linkController),
-              const SizedBox(height: 20),  
-              SubmitButton(onPressed: controller.createJob),
+              LinkTextField(controller: controller.linkController),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: SubmitButton(
+                      onPressed: controller.createJob,
+                      label: 'Naive Bayes',
+                      colors: const [Color(0xFF6C63FF), Color(0xFF48CAE4)],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: SubmitButton(
+                      onPressed: controller.createJobVader,
+                      label: 'VADER',
+                      colors: const [Color(0xFFF2994A), Color(0xFFF2C94C)],
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
