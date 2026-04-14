@@ -32,6 +32,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from deep_translator import GoogleTranslator
 from keybert import KeyBERT
 from sentence_transformers import SentenceTransformer
 from collections import Counter
@@ -428,23 +429,40 @@ def _run_vader_analysis_job(job_id, shortlink):
             set_progress(job_id, status="completed", percent=100, message="No reviews found", data={"category": category_name, "product_name": product_name, "star_counts": star_counts, "items": []})
             return
 
-        set_progress(job_id, percent=55, message="Predicting sentiments with VADER...")
+        set_progress(job_id, percent=40, message="Menerjemahkan ulasan ke Bahasa Inggris...")
+        translator = GoogleTranslator(source='id', target='en')
+        translated_reviews = []
+        
+        for i, review in enumerate(reviews, 1):
+            try:
+                # Bersihkan emoji dan simbol aneh agar tidak membuat API error
+                clean_review = re.sub(r'[^\w\s.,!?-]', '', review)
+                
+                tr_text = translator.translate(clean_review[:4999])
+                if not tr_text or not tr_text.strip():
+                    translated_reviews.append(review)
+                else:
+                    translated_reviews.append(tr_text)
+            except Exception as e:
+                logging.warning(f"Gagal menerjemahkan (fallback ori): {str(e)} -> {review[:30]}...")
+                translated_reviews.append(review)
+                
+            # Update progress occasionally
+            if i % 3 == 0:
+                set_progress(job_id, percent=40 + int(15 * (i/len(reviews))), message=f"Menerjemahkan {i}/{len(reviews)} ulasan...")
+
+        set_progress(job_id, percent=55, message="Memprediksi sentimen dengan VADER...")
         sia = SentimentIntensityAnalyzer()
         
         preds = []
-        for review in reviews:
-            score = sia.polarity_scores(review)
+        for i, (review_ori, review_en) in enumerate(zip(reviews, translated_reviews)):
+            score = sia.polarity_scores(review_en)
             
-            scores_dict = {'Positif': score['pos'], 'Negatif': score['neg'], 'Netral': score['neu']}
-            sentiment_label = max(scores_dict, key=scores_dict.get)
+            sentiment_label = "Positif" if score['compound'] >= 0 else "Negatif"
+            logging.info(f"[VADER] Scores: neg={score['neg']}, neu={score['neu']}, pos={score['pos']}, compound={score['compound']} -> {sentiment_label} | EN: {review_en[:60]}...")
             
-            # Map 'Netral' to 'Positif'
-            if sentiment_label in ['Positif', 'Netral']:
-                sentiment_label = 'Positif'
-            
-            logging.info(f"[VADER] Scores: neg={score['neg']}, neu={score['neu']}, pos={score['pos']}, compound={score['compound']} -> mapped to {sentiment_label} | Review: {review[:80]}...")
-            
-            if sentiment_label == 'Positif':
+            # Threshold: >= 0.0 diubah jadi Positif (1) agar cocok dengan return format
+            if score['compound'] >= 0:
                 preds.append(1)
             else:
                 preds.append(0)
